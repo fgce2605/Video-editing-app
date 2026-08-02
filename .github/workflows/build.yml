@@ -19,8 +19,17 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Generate debug keystore
+        run: |
+          keytool -genkey -v -keystore app/debug.keystore \
+            -storepass android -alias androiddebugkey \
+            -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.9'
 
       - name: Build Debug APK
         run: gradle assembleDebug
