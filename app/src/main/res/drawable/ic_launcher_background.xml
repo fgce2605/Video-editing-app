@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108"
+                android:type="linear">
+                <item android:color="#0F111A" android:offset="0.0" />
+                <item android:color="#1A1D2C" android:offset="0.5" />
+                <item android:color="#0B0D14" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Accent subtle studio glow circles -->
+    <path
+        android:pathData="M15,15m-20,0a20,20 0 1,0 40,0a20,20 0 1,0 -40,0"
+        android:fillColor="#33FF5252" />
+    <path
+        android:pathData="M93,93m-25,0a25,25 0 1,0 50,0a25,25 0 1,0 -50,0"
+        android:fillColor="#223D7EFF" />
+</vector>

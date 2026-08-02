@@ -1,0 +1,6 @@
+{
+  "name": "ProEdit Studio",
+  "description": "Professional-grade multi-track video editor with AI tools, color grading, keyframe animation, audio studio, export presets, and local project management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

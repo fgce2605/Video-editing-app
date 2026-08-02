@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Film Clap / Camera / Play symbol in studio badge -->
+    <path
+        android:pathData="M28,32 L80,32 C84,32 86,34 86,38 L86,70 C86,74 84,76 80,76 L28,76 C24,76 22,74 22,70 L22,38 C22,34 24,32 28,32 Z"
+        android:fillColor="#1F2332"
+        android:strokeWidth="2.5"
+        android:strokeColor="#3D7EFF" />
+
+    <!-- Play Triangle -->
+    <path
+        android:pathData="M44,42 L68,54 L44,66 Z"
+        android:fillColor="#FF5252" />
+
+    <!-- Top timeline strip -->
+    <path
+        android:pathData="M26,24 L48,24 L48,28 L26,28 Z"
+        android:fillColor="#3D7EFF" />
+    <path
+        android:pathData="M52,24 L82,24 L82,28 L52,28 Z"
+        android:fillColor="#00E5FF" />
+
+    <!-- Bottom timeline audio track strip -->
+    <path
+        android:pathData="M26,80 L60,80 L60,84 L26,84 Z"
+        android:fillColor="#FFD700" />
+    <path
+        android:pathData="M64,80 L82,80 L82,84 L64,84 Z"
+        android:fillColor="#FF5252" />
+
+    <!-- Playhead vertical line -->
+    <path
+        android:pathData="M54,18 L54,90"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF" />
+    <path
+        android:pathData="M50,18 L58,18 L54,23 Z"
+        android:fillColor="#FFFFFF" />
+</vector>
