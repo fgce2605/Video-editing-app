@@ -109,6 +109,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _isAiProcessing = MutableStateFlow(false)
     val isAiProcessing: StateFlow<Boolean> = _isAiProcessing.asStateFlow()
 
+    private val _isImportingMedia = MutableStateFlow(false)
+    val isImportingMedia: StateFlow<Boolean> = _isImportingMedia.asStateFlow()
+
+    private val _importProgressMessage = MutableStateFlow<String?>("Processing media...")
+    val importProgressMessage: StateFlow<String?> = _importProgressMessage.asStateFlow()
+
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
@@ -582,6 +588,85 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             )
             repository.saveProject(entity)
             showStatus("Project saved locally to Room DB")
+        }
+    }
+
+    // Media Import Engine
+    fun importMediaFromUris(
+        context: android.content.Context,
+        uris: List<android.net.Uri>,
+        targetTrackType: TrackType = TrackType.VIDEO_PRIMARY,
+        targetTrackId: String? = null,
+        atTimeMs: Long? = null
+    ) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _isImportingMedia.value = true
+            _importProgressMessage.value = "Importing ${uris.size} file(s)..."
+            pushUndoState()
+
+            var insertedCount = 0
+            var insertionTime = atTimeMs ?: _currentTimeMs.value
+
+            for (uri in uris) {
+                _importProgressMessage.value = "Copying media file into project directory..."
+                val result = com.example.util.MediaImportHelper.processImportedUri(context, uri)
+                val isAudio = result.isAudio || targetTrackType == TrackType.AUDIO_MUSIC || targetTrackType == TrackType.AUDIO_VOICEOVER
+
+                if (isAudio) {
+                    val targetTrack = _tracks.value.find {
+                        (targetTrackId != null && it.id == targetTrackId) ||
+                        (targetTrackType == TrackType.AUDIO_VOICEOVER && it.type == TrackType.AUDIO_VOICEOVER) ||
+                        (it.type == TrackType.AUDIO_MUSIC)
+                    } ?: _tracks.value.find { it.type == TrackType.AUDIO_MUSIC || it.type == TrackType.AUDIO_VOICEOVER }
+
+                    if (targetTrack != null) {
+                        val newAudio = AudioClip(
+                            id = UUID.randomUUID().toString(),
+                            title = result.title,
+                            uri = result.localFilePath,
+                            startInTimelineMs = insertionTime,
+                            durationMs = result.durationMs,
+                            volume = 0.9f,
+                            isVoiceover = (targetTrack.type == TrackType.AUDIO_VOICEOVER)
+                        )
+                        _tracks.value = _tracks.value.map {
+                            if (it.id == targetTrack.id) it.copy(audioClips = it.audioClips + newAudio) else it
+                        }
+                        insertionTime += result.durationMs
+                        insertedCount++
+                    }
+                } else {
+                    val targetTrack = _tracks.value.find {
+                        (targetTrackId != null && it.id == targetTrackId) ||
+                        (it.type == targetTrackType) ||
+                        (it.type == TrackType.VIDEO_PRIMARY)
+                    } ?: _tracks.value.find { it.type == TrackType.VIDEO_PRIMARY || it.type == TrackType.VIDEO_OVERLAY }
+
+                    if (targetTrack != null) {
+                        val newClip = Clip(
+                            id = UUID.randomUUID().toString(),
+                            mediaId = result.localFilePath,
+                            title = result.title,
+                            startInTimelineMs = insertionTime,
+                            durationMs = result.durationMs,
+                            sourceTrimStartMs = 0L,
+                            sourceTrimEndMs = result.durationMs
+                        )
+                        _tracks.value = _tracks.value.map {
+                            if (it.id == targetTrack.id) it.copy(clips = it.clips + newClip) else it
+                        }
+                        _selectedTrackId.value = targetTrack.id
+                        _selectedClipId.value = newClip.id
+                        insertionTime += result.durationMs
+                        insertedCount++
+                    }
+                }
+            }
+
+            recalculateTotalDuration()
+            _isImportingMedia.value = false
+            showStatus("Imported $insertedCount clip(s) to timeline")
         }
     }
 

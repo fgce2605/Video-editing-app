@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Download
@@ -29,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,7 +54,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AspectRatioPreset
+import com.example.data.model.Track
+import com.example.data.model.TrackType
 import com.example.ui.dialogs.ExportProgressDialog
+import com.example.ui.dialogs.ImportMediaSheet
+import com.example.ui.dialogs.ImportingLoadingDialog
 import com.example.ui.panels.EditingPanelContainer
 import com.example.ui.preview.VideoPreviewCanvas
 import com.example.ui.theme.StudioBorder
@@ -89,10 +95,16 @@ fun MainEditorScreen(
     val activeExportJob by viewModel.activeExportJob.collectAsState()
     val exportQueue by viewModel.exportQueue.collectAsState()
     val isAiProcessing by viewModel.isAiProcessing.collectAsState()
+    val isImportingMedia by viewModel.isImportingMedia.collectAsState()
+    val importProgressMessage by viewModel.importProgressMessage.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
 
     var showAspectDropdown by remember { mutableStateOf(false) }
     var showExportProgressDialog by remember { mutableStateOf(false) }
+
+    var showImportSheet by remember { mutableStateOf(false) }
+    var activeTargetTrack by remember { mutableStateOf<Track?>(null) }
+    var activeTargetTimeMs by remember { mutableStateOf<Long?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -110,7 +122,21 @@ fun MainEditorScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = StudioDarkBg
+        containerColor = StudioDarkBg,
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    activeTargetTrack = null
+                    activeTargetTimeMs = currentTimeMs
+                    showImportSheet = true
+                },
+                containerColor = StudioRedPrimary,
+                contentColor = Color.White,
+                icon = { Icon(imageVector = Icons.Default.Add, contentDescription = "Import Media") },
+                text = { Text("Import Media", fontWeight = FontWeight.Bold) },
+                modifier = Modifier.testTag("fab_import_media_btn")
+            )
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -286,7 +312,39 @@ fun MainEditorScreen(
                 onSelectTextOverlay = { viewModel.selectTextOverlay(it) },
                 onSplitAtPlayhead = { viewModel.splitClipAtCurrentTime() },
                 onZoomChange = { viewModel.setZoomFactor(it) },
-                formatTimestamp = { viewModel.formatTimestamp(it) }
+                formatTimestamp = { viewModel.formatTimestamp(it) },
+                onOpenImportMedia = { track, timeMs ->
+                    activeTargetTrack = track
+                    activeTargetTimeMs = timeMs
+                    showImportSheet = true
+                }
+            )
+        }
+
+        // Import Media Bottom Sheet
+        if (showImportSheet) {
+            ImportMediaSheet(
+                targetTrackName = activeTargetTrack?.name ?: "Video Track 1",
+                targetTrackType = activeTargetTrack?.type ?: TrackType.VIDEO_PRIMARY,
+                targetTrackId = activeTargetTrack?.id,
+                targetTimeMs = activeTargetTimeMs ?: currentTimeMs,
+                onDismiss = { showImportSheet = false },
+                onImportSelected = { context, uris, trackType, trackId, atTimeMs ->
+                    viewModel.importMediaFromUris(
+                        context = context,
+                        uris = uris,
+                        targetTrackType = trackType,
+                        targetTrackId = trackId,
+                        atTimeMs = atTimeMs
+                    )
+                }
+            )
+        }
+
+        // Importing Progress Loading Dialog
+        if (isImportingMedia) {
+            ImportingLoadingDialog(
+                message = importProgressMessage ?: "Processing media..."
             )
         }
 

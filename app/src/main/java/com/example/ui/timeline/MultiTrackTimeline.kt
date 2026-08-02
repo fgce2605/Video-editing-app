@@ -22,6 +22,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Lock
@@ -90,6 +92,7 @@ fun MultiTrackTimeline(
     onSplitAtPlayhead: () -> Unit,
     onZoomChange: (Float) -> Unit,
     formatTimestamp: (Long) -> String,
+    onOpenImportMedia: (Track?, Long?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -103,7 +106,7 @@ fun MultiTrackTimeline(
             .background(StudioDarkBg)
             .border(1.dp, StudioBorder)
     ) {
-        // Timeline Header Controls (Split button + Zoom Controls)
+        // Timeline Header Controls (Split button + Import Media + Zoom Controls)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -116,6 +119,34 @@ fun MultiTrackTimeline(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Prominent Import Media Button
+                Surface(
+                    onClick = { onOpenImportMedia(null, currentTimeMs) },
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1E2638),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, StudioCyanAI),
+                    modifier = Modifier.testTag("timeline_import_media_btn")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Import Media",
+                            tint = StudioCyanAI,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "+ Import Media",
+                            color = StudioCyanAI,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 Surface(
                     onClick = onSplitAtPlayhead,
                     shape = RoundedCornerShape(6.dp),
@@ -211,7 +242,10 @@ fun MultiTrackTimeline(
 
                 // Track Title List
                 tracks.forEach { track ->
-                    TrackHeaderItem(track = track)
+                    TrackHeaderItem(
+                        track = track,
+                        onAddMediaToTrack = { trk -> onOpenImportMedia(trk, currentTimeMs) }
+                    )
                 }
 
                 // Text Overlay Track Header
@@ -247,7 +281,8 @@ fun MultiTrackTimeline(
                             track = track,
                             pxPerMs = pxPerMs,
                             selectedClipId = selectedClipId,
-                            onSelectClip = { clipId -> onSelectClip(track.id, clipId) }
+                            onSelectClip = { clipId -> onSelectClip(track.id, clipId) },
+                            onEmptyTrackClick = { clickedMs -> onOpenImportMedia(track, clickedMs) }
                         )
                     }
 
@@ -289,7 +324,10 @@ fun MultiTrackTimeline(
 }
 
 @Composable
-private fun TrackHeaderItem(track: Track) {
+private fun TrackHeaderItem(
+    track: Track,
+    onAddMediaToTrack: (Track) -> Unit = {}
+) {
     val icon = when (track.type) {
         TrackType.VIDEO_PRIMARY -> Icons.Default.Movie
         TrackType.VIDEO_OVERLAY -> Icons.Default.Movie
@@ -328,6 +366,20 @@ private fun TrackHeaderItem(track: Track) {
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1
+            )
+        }
+
+        IconButton(
+            onClick = { onAddMediaToTrack(track) },
+            modifier = Modifier
+                .size(22.dp)
+                .testTag("add_clip_to_track_${track.id}")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Add media to ${track.name}",
+                tint = iconColor,
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -406,7 +458,8 @@ private fun TrackLaneItem(
     track: Track,
     pxPerMs: Float,
     selectedClipId: String?,
-    onSelectClip: (String) -> Unit
+    onSelectClip: (String) -> Unit,
+    onEmptyTrackClick: (Long) -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -414,6 +467,12 @@ private fun TrackLaneItem(
             .height(34.dp)
             .background(StudioTrackBg)
             .border(1.dp, Color(0xFF1A1E2B))
+            .pointerInput(track.id, pxPerMs) {
+                detectTapGestures { offset ->
+                    val clickedTimeMs = (offset.x / pxPerMs).toLong()
+                    onEmptyTrackClick(clickedTimeMs)
+                }
+            }
     ) {
         // Video Clips
         track.clips.forEach { clip ->
