@@ -1,5 +1,6 @@
 package com.example.ui.preview
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +40,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,12 +58,21 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.example.data.model.AspectRatioPreset
 import com.example.data.model.Clip
 import com.example.data.model.ColorGrading
@@ -67,6 +80,7 @@ import com.example.data.model.FilterPreset
 import com.example.data.model.SubtitleSegment
 import com.example.data.model.TextOverlay
 import com.example.data.model.Track
+import com.example.data.model.TrackType
 import com.example.data.model.TransitionType
 import com.example.ui.theme.StudioBorder
 import com.example.ui.theme.StudioCyanAI
@@ -75,6 +89,7 @@ import com.example.ui.theme.StudioRedPrimary
 import com.example.ui.theme.StudioTextMuted
 import com.example.ui.theme.StudioTextPrimary
 import com.example.ui.theme.StudioTextSecondary
+import java.io.File
 import kotlin.math.sin
 
 @Composable
@@ -94,21 +109,120 @@ fun VideoPreviewCanvas(
     formatTimestamp: (Long) -> String,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var showControls by remember { mutableStateOf(true) }
+    var isBuffering by remember { mutableStateOf(false) }
 
-    // Find active clip at current timestamp
+    // Initialize ExoPlayer safely
+    val exoPlayer = remember(context) {
+        ExoPlayer.Builder(context).build().apply {
+            playWhenReady = false
+            repeatMode = Player.REPEAT_MODE_OFF
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = (playbackState == Player.STATE_BUFFERING)
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
+    }
+
+    // Find active clip on primary video track at current timestamp
     val activeClip = remember(tracks, currentTimeMs) {
         var found: Clip? = null
         for (track in tracks) {
-            for (clip in track.clips) {
-                if (currentTimeMs >= clip.startInTimelineMs && currentTimeMs <= clip.startInTimelineMs + clip.durationMs) {
-                    found = clip
-                    break
+            if (track.type == TrackType.VIDEO_PRIMARY) {
+                for (clip in track.clips) {
+                    if (currentTimeMs >= clip.startInTimelineMs && currentTimeMs <= clip.startInTimelineMs + clip.durationMs) {
+                        found = clip
+                        break
+                    }
+                }
+            }
+            if (found != null) break
+        }
+        // Fallback to any video clip if primary track clip not found
+        if (found == null) {
+            for (track in tracks) {
+                for (clip in track.clips) {
+                    if (currentTimeMs >= clip.startInTimelineMs && currentTimeMs <= clip.startInTimelineMs + clip.durationMs) {
+                        found = clip
+                        break
+                    }
+                }
+                if (found != null) break
+            }
+        }
+        found
+    }
+
+    // Find active clip on secondary video overlay track
+    val activeOverlayClip = remember(tracks, currentTimeMs) {
+        var found: Clip? = null
+        for (track in tracks) {
+            if (track.type == TrackType.VIDEO_OVERLAY) {
+                for (clip in track.clips) {
+                    if (currentTimeMs >= clip.startInTimelineMs && currentTimeMs <= clip.startInTimelineMs + clip.durationMs) {
+                        found = clip
+                        break
+                    }
                 }
             }
             if (found != null) break
         }
         found
+    }
+
+    // Determine if active clip has a valid local file / URI to play via ExoPlayer
+    val isRealMediaFile = remember(activeClip?.mediaId) {
+        activeClip != null && isMediaUriValid(activeClip.mediaId)
+    }
+
+    // Load media item into ExoPlayer when mediaUri changes
+    LaunchedEffect(activeClip?.mediaId) {
+        if (activeClip != null && isRealMediaFile) {
+            try {
+                val mediaUri = parseMediaUri(activeClip.mediaId)
+                exoPlayer.setMediaItem(MediaItem.fromUri(mediaUri))
+                exoPlayer.prepare()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+        }
+    }
+
+    // Sync playback position & speed with ExoPlayer
+    LaunchedEffect(currentTimeMs, activeClip?.id, isRealMediaFile) {
+        if (activeClip != null && isRealMediaFile) {
+            val offsetMs = (currentTimeMs - activeClip.startInTimelineMs)
+            val clipInternalMs = (offsetMs * activeClip.speed + activeClip.sourceTrimStartMs).toLong()
+            val boundedMs = clipInternalMs.coerceAtLeast(0L)
+            if (kotlin.math.abs(exoPlayer.currentPosition - boundedMs) > 150) {
+                exoPlayer.seekTo(boundedMs)
+            }
+            exoPlayer.playbackParameters = PlaybackParameters(activeClip.speed)
+        }
+    }
+
+    // Play / Pause ExoPlayer sync
+    LaunchedEffect(isPlaying, isRealMediaFile) {
+        if (isRealMediaFile) {
+            if (isPlaying) {
+                exoPlayer.play()
+            } else {
+                exoPlayer.pause()
+            }
+        }
     }
 
     // Active subtitles
@@ -156,12 +270,82 @@ fun VideoPreviewCanvas(
                         .border(1.dp, Color(0xFF222838), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Render Animated Simulated Frame Shader
-                    SimulatedVideoFrame(
-                        clip = activeClip,
-                        currentTimeMs = currentTimeMs,
-                        isPlaying = isPlaying
-                    )
+                    // Main Video Player / Canvas Container with crop & scale transforms
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                if (activeClip != null) {
+                                    scaleX = activeClip.cropConfig.scale
+                                    scaleY = activeClip.cropConfig.scale
+                                    rotationZ = activeClip.cropConfig.rotationDeg
+                                    translationX = activeClip.cropConfig.offsetX
+                                    translationY = activeClip.cropConfig.offsetY
+                                }
+                            }
+                    ) {
+                        if (isRealMediaFile) {
+                            // ExoPlayer View for imported media files
+                            AndroidView(
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        useController = false
+                                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                        player = exoPlayer
+                                    }
+                                },
+                                update = { view ->
+                                    view.player = exoPlayer
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            // Stylized Video Frame Shader for virtual/sample clips
+                            SimulatedVideoFrame(
+                                clip = activeClip,
+                                currentTimeMs = currentTimeMs,
+                                isPlaying = isPlaying
+                            )
+                        }
+
+                        // Live Color Grading & Filter Preset Overlay
+                        activeClip?.colorGrading?.let { grading ->
+                            if (grading.brightness != 0f || grading.contrast != 0f ||
+                                grading.saturation != 0f || grading.warmth != 0f ||
+                                grading.filterPreset != FilterPreset.NONE) {
+                                ColorGradingFilterOverlay(colorGrading = grading)
+                            }
+                        }
+                    }
+
+                    // Multi-track Video Overlay (Picture-in-Picture)
+                    activeOverlayClip?.let { overlayClip ->
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                                .size(110.dp, 75.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.5.dp, StudioCyanAI, RoundedCornerShape(8.dp))
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SimulatedVideoFrame(
+                                clip = overlayClip,
+                                currentTimeMs = currentTimeMs,
+                                isPlaying = isPlaying
+                            )
+                            Text(
+                                text = "B-Roll Overlay",
+                                color = StudioCyanAI,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 2.dp)
+                            )
+                        }
+                    }
 
                     // Render Active Text Overlays
                     activeOverlays.forEach { overlay ->
@@ -242,6 +426,30 @@ fun VideoPreviewCanvas(
                                         }
                                     )
                             )
+                        }
+                    }
+
+                    // Buffering Indicator Overlay
+                    if (isBuffering) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x77000000)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(
+                                    color = StudioCyanAI,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Buffering Preview...",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
 
@@ -386,6 +594,104 @@ fun VideoPreviewCanvas(
 }
 
 @Composable
+private fun ColorGradingFilterOverlay(
+    colorGrading: ColorGrading,
+    modifier: Modifier = Modifier
+) {
+    val matrix = remember(colorGrading) {
+        buildColorMatrixForGrading(colorGrading)
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        drawRect(
+            color = Color.White.copy(alpha = 0.05f),
+            colorFilter = ColorFilter.colorMatrix(matrix)
+        )
+    }
+}
+
+private fun buildColorMatrixForGrading(colorGrading: ColorGrading): ColorMatrix {
+    val matrix = ColorMatrix()
+
+    // Saturation
+    val sat = (1.0f + colorGrading.saturation / 100f).coerceIn(0f, 3f)
+    matrix.setToSaturation(sat)
+
+    val vals = matrix.values
+    val c = (1.0f + colorGrading.contrast / 100f).coerceIn(0.1f, 3f)
+    val b = colorGrading.brightness * 2.55f
+
+    // Adjust contrast and brightness offsets
+    vals[0] *= c; vals[4] += b
+    vals[6] *= c; vals[9] += b
+    vals[12] *= c; vals[14] += b
+
+    if (colorGrading.warmth != 0f) {
+        val w = colorGrading.warmth * 1.5f
+        vals[0] += w
+        vals[12] -= w * 0.5f
+    }
+
+    // Apply Filter Preset styling
+    when (colorGrading.filterPreset) {
+        FilterPreset.CYBERPUNK -> {
+            vals[0] *= 0.8f; vals[2] += 0.4f
+            vals[6] *= 0.7f; vals[8] += 0.5f
+            vals[10] *= 1.2f
+        }
+        FilterPreset.GOLDEN_HOUR -> {
+            vals[0] *= 1.2f; vals[4] += 15f
+            vals[6] *= 1.0f; vals[9] += 10f
+            vals[12] *= 0.8f
+        }
+        FilterPreset.CINEMATIC -> {
+            vals[0] *= 0.9f; vals[2] += 0.2f
+            vals[6] *= 1.05f
+            vals[10] *= 0.85f; vals[14] += 10f
+        }
+        FilterPreset.NOIR -> {
+            matrix.setToSaturation(0f)
+            val nVals = matrix.values
+            nVals[0] *= 1.2f; nVals[6] *= 1.2f; nVals[12] *= 1.2f
+        }
+        FilterPreset.VINTAGE -> {
+            vals[0] *= 1.1f; vals[4] += 10f
+            vals[6] *= 0.95f
+            vals[12] *= 0.85f
+        }
+        FilterPreset.VIVID -> {
+            matrix.setToSaturation(1.5f)
+        }
+        FilterPreset.MOODY -> {
+            matrix.setToSaturation(0.6f)
+            vals[4] -= 15f; vals[9] -= 15f; vals[14] -= 5f
+        }
+        FilterPreset.NONE -> {}
+    }
+
+    return matrix
+}
+
+private fun isMediaUriValid(mediaId: String): Boolean {
+    if (mediaId.startsWith("content://") || mediaId.startsWith("file://") || mediaId.startsWith("http://") || mediaId.startsWith("https://")) {
+        return true
+    }
+    if (mediaId.startsWith("/")) {
+        val file = File(mediaId)
+        return file.exists() && file.length() > 0
+    }
+    return false
+}
+
+private fun parseMediaUri(mediaId: String): Uri {
+    return if (mediaId.startsWith("/")) {
+        Uri.fromFile(File(mediaId))
+    } else {
+        Uri.parse(mediaId)
+    }
+}
+
+@Composable
 private fun SimulatedVideoFrame(
     clip: Clip?,
     currentTimeMs: Long,
@@ -424,8 +730,6 @@ private fun SimulatedVideoFrame(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .scale(clip.cropConfig.scale)
-            .rotate(clip.cropConfig.rotationDeg)
             .background(
                 Brush.linearGradient(
                     colors = filterColors,
